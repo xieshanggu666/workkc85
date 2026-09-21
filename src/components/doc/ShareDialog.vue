@@ -3,6 +3,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { db } from '@/db'
 import { uid, makeToken, formatDate, formatFull } from '@/utils/format'
 import { docUrl, shareUrl, shareStatus, shareStatusLabel } from '@/utils/share'
+import { notifyChange, CHANGE_SCOPE } from '@/utils/sync'
 import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps({ open: Boolean, doc: Object })
@@ -42,6 +43,8 @@ async function create() {
   }
   await db.shares.add(s)
   shares.value.unshift(s)
+  // 新链接可能让其他窗口的访客立即获得访问：广播使共享页等缓存失效
+  notifyChange([CHANGE_SCOPE.SHARES])
 }
 
 // 撤销：标记状态而非删除，链接端可明确提示「已撤销」
@@ -50,6 +53,8 @@ async function revoke(id) {
   await db.shares.update(id, { revokedAt })
   const s = shares.value.find((x) => x.id === id)
   if (s) s.revokedAt = revokedAt
+  // 撤销即时生效：其他窗口中凭该链接打开的正文需立即收回
+  notifyChange([CHANGE_SCOPE.SHARES])
 }
 
 function statusOf(s) {

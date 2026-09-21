@@ -9,7 +9,8 @@ import { useFreshnessStore } from '@/stores/freshness'
 import { useRetirementStore } from '@/stores/retirement'
 import RichEditor from '@/components/doc/RichEditor.vue'
 import { docVersion, fieldLabels } from '@/utils/version'
-import { canEditDoc, ROLE, GUEST_ID } from '@/utils/permission'
+import { canEditDoc, canViewDoc, ROLE, GUEST_ID } from '@/utils/permission'
+import { onRemoteChange, CHANGE_SCOPE } from '@/utils/sync'
 
 const route = useRoute()
 const router = useRouter()
@@ -266,7 +267,34 @@ function scheduleAutoSave() {
 watch([title, categoryId, tagIds, visibility, body], scheduleAutoSave, { deep: true })
 
 onMounted(load)
-onBeforeUnmount(() => { clearTimeout(saveTimer.value); if (!isEdit.value) saveDraft() })
+onBeforeUnmount(() => { clearTimeout(saveTimer.value); if (!isEdit.value) saveDraft(); offRemote?.() })
+
+// 跨窗口权限同步：授权撤销/到期、责任交接收回、退役、评审状态变化后，
+// 重新读库复核编辑器的可见/可写状态——正文立即只读收回，未提交内容保留在本地草稿中不丢失
+let offRemote = null
+onMounted(() => {
+  offRemote = onRemoteChange(async (payload) => {
+    if (!isEdit.value) return
+    if (!payload.scopes.some((s) => [CHANGE_SCOPE.DOCS, CHANGE_SCOPE.ACCESS, CHANGE_SCOPE.REVIEWS, CHANGE_SCOPE.RETIREMENTS, CHANGE_SCOPE.ALL].includes(s))) return
+    if (saving.value) return
+    // getDocFresh 直接读库，绕过内存缓存，避免本窗口 store 尚未完成重载时读到旧数据
+    const d = await kb.getDocFresh(route.params.id)
+    if (!d) { router.replace('/docs'); return }
+    // 连查看权都失去（如限时阅读授权撤销）：离开编辑器，正文不再展示
+    const grant = accessStore.grantOf(d.id, auth.user?.id)
+    if (!canViewDoc(d, auth.user?.id, null, grant)) {
+      router.replace('/docs/' + d.id)
+      return
+    }
+    const active = reviewStore.pendingReviewOf(d.id)
+    const activeRetirement = retirementStore.activeRetirementOfDoc(d.id)
+    activeGrant.value = grant
+    lockedByReview.value = !!active && auth.user?.role !== ROLE.ADMIN
+    accessDenied.value = !canEditDoc(d, {
+      userId: auth.user?.id || GUEST_ID, role: auth.user?.role, grant, pendingReview: active, activeRetirement
+    })
+  })
+})
 
 const canPublish = computed(() => title.value.trim() && categoryId.value)
 const userById = computed(() => Object.fromEntries(auth.users.map((u) => [u.id, u.name])))

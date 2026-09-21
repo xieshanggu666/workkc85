@@ -8,6 +8,7 @@ import { FRESH, calcDueAt, isFreshnessEnabled, isFreshTicketOpen, canManageFresh
 import { GUEST_ID, isGuestUser, ROLE } from '@/utils/permission'
 import { canSubmitReview } from '@/utils/review'
 import { isGrantActive, ACCESS_PERM } from '@/utils/access'
+import { notifyChange, CHANGE_SCOPE } from '@/utils/sync'
 import { useKbStore } from './kb'
 
 // 知识保鲜 store：
@@ -163,6 +164,8 @@ export const useFreshnessStore = defineStore('freshness', () => {
     })
 
     await Promise.all([reload(), kb.reloadDocs()])
+    // 到期自动暂停问答引用：通知其他窗口已渲染的问答答案即时收回引用
+    notifyChange([CHANGE_SCOPE.FRESHNESS, CHANGE_SCOPE.DOCS])
   }
 
   // 负责人设置/调整复核周期。
@@ -214,6 +217,7 @@ export const useFreshnessStore = defineStore('freshness', () => {
     })
 
     await Promise.all([reload(), useKbStore().reloadDocs()])
+    if (result.status === 'ok') notifyChange([CHANGE_SCOPE.FRESHNESS, CHANGE_SCOPE.DOCS])
     return result
   }
 
@@ -251,6 +255,7 @@ export const useFreshnessStore = defineStore('freshness', () => {
     })
 
     await Promise.all([reload(), useKbStore().reloadDocs()])
+    if (result.status === 'ok') notifyChange([CHANGE_SCOPE.FRESHNESS, CHANGE_SCOPE.DOCS])
     return result
   }
 
@@ -328,6 +333,7 @@ export const useFreshnessStore = defineStore('freshness', () => {
 
     const { useReviewStore: useReview } = await import('./review')
     await Promise.all([reload(), kb.reloadDocs(), useReview().reload()])
+    if (result.status === 'ok') notifyChange([CHANGE_SCOPE.FRESHNESS, CHANGE_SCOPE.DOCS, CHANGE_SCOPE.REVIEWS])
     return result
   }
 

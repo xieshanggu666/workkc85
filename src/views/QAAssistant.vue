@@ -31,39 +31,50 @@ const thinking = ref(false)
 const answered = ref(false)
 const answer = ref('')
 const docById = computed(() => Object.fromEntries(kb.docs.map((d) => [d.id, d])))
-// 提问时刻的原始检索命中（含受限文档正文片段）；展示层按当前授权实时过滤——
-// 授权撤销/到期后，受限引用与正文片段即时从已渲染答案中收回，不依赖重新提问
-const rawCites = ref([])
-const rawRelated = ref([])
-// 提问时刻命中的已退役文档：不作为引用，单独引导用户转看其替代文档
-const retiredHits = ref([])
+// 提问时刻的原始检索命中只缓存「文档 id + 展示用片段/得分」，不缓存权限相关字段：
+// 展示层一律按 id 回查 store 中最新文档再做 canViewDoc/引用闸门判定，
+// 授权撤销、责任交接（ownerId/editors 变更）、保鲜/退役后，已渲染答案中的受限正文即时收回
+const rawCites = ref([]) // [{ id, bodyText, snippet, score }]
+const rawRelated = ref([]) // [docId]
+// 提问时刻命中的已退役文档 id：不作为引用，单独引导用户转看其替代文档
+const retiredHits = ref([]) // [docId]
 const suggestions = ['Vue 如何初始化项目?', 'Dexie 怎么进行查询?', '权限模型里有哪些角色?', '新成员入职流程是什么?']
 
-// 展示用引用/相关条目：随授权记录、到期时钟、退役状态响应式重算，被收回/退役的内容即时消失
-function grantOf(d) { return accessStore.grantOf(d.id, auth.user?.id) }
-function freshTicketOf(d) { return freshnessStore.activeTicketOf(d.id) }
-function retirementOf(d) { return retirementStore.activeRetirementOfDoc(d.id) }
+// 展示用引用/相关条目：按 id 回查 store 最新文档，随授权记录、到期时钟、交接、退役状态响应式重算
+function liveDoc(id) { return docById.value[id] || null }
+function grantOf(d) { return d ? accessStore.grantOf(d.id, auth.user?.id) : null }
+function freshTicketOf(d) { return d ? freshnessStore.activeTicketOf(d.id) : null }
+function retirementOf(d) { return d ? retirementStore.activeRetirementOfDoc(d.id) : null }
 const citableNow = (d) =>
+  !!d &&
   isDocCitable(d, freshTicketOf(d), freshnessStore.now) &&
   isDocRetireCitable(d, retirementOf(d))
-const cites = computed(() => rawCites.value.filter((c) => canViewDoc(c, auth.user?.id, null, grantOf(c)) && citableNow(c)))
-const related = computed(() => rawRelated.value.filter((d) => canViewDoc(d, auth.user?.id, null, grantOf(d)) && citableNow(d)))
-// 已渲染答案中被收回的引用数（限时授权撤销/到期、知识保鲜暂停、知识退役导致）
+const viewableNow = (d) => !!d && canViewDoc(d, auth.user?.id, null, grantOf(d))
+const cites = computed(() => rawCites.value.map((c) => {
+  const d = liveDoc(c.id)
+  if (!d || !viewableNow(d) || !citableNow(d)) return null
+  return { ...d, bodyText: c.bodyText, snippet: c.snippet, score: c.score }
+}).filter(Boolean))
+const related = computed(() => rawRelated.value.map((id) => liveDoc(id)).filter((d) => d && viewableNow(d) && citableNow(d)))
+// 已渲染答案中被收回的引用数（限时授权撤销/到期、责任交接收回、知识保鲜暂停、知识退役导致）
 const revokedCount = computed(() => rawCites.value.length - cites.value.length)
 // 其中因知识保鲜到期暂停引用的篇数（用于给出针对性提示）
-const freshnessPausedCount = computed(() => rawCites.value.filter((c) => canViewDoc(c, auth.user?.id, null, grantOf(c)) && !isDocCitable(c, freshTicketOf(c), freshnessStore.now)).length)
+const freshnessPausedCount = computed(() => rawCites.value.reduce((n, c) => {
+  const d = liveDoc(c.id)
+  return n + (d && viewableNow(d) && !isDocCitable(d, freshTicketOf(d), freshnessStore.now) ? 1 : 0)
+}, 0))
 // 其中因知识退役停止引用的篇数
-const retiredCount = computed(() => rawCites.value.filter((c) =>
-  canViewDoc(c, auth.user?.id, null, grantOf(c)) &&
-  isDocCitable(c, freshTicketOf(c), freshnessStore.now) &&
-  !isDocRetireCitable(c, retirementOf(c))
-).length)
+const retiredCount = computed(() => rawCites.value.reduce((n, c) => {
+  const d = liveDoc(c.id)
+  return n + (d && viewableNow(d) && isDocCitable(d, freshTicketOf(d), freshnessStore.now) && !isDocRetireCitable(d, retirementOf(d)) ? 1 : 0)
+}, 0))
 // 被退役引用所指向的替代文档（提示用户转看新文档）
 const retiredReplacements = computed(() => {
   const ids = new Set()
   const out = []
   for (const c of rawCites.value) {
-    const rt = retirementOf(c)
+    const d = liveDoc(c.id)
+    const rt = retirementOf(d)
     if (!rt || ids.has(rt.replacementDocId)) continue
     ids.add(rt.replacementDocId)
     const rep = docById.value[rt.replacementDocId]
@@ -75,8 +86,8 @@ const retiredReplacements = computed(() => {
 const retiredHitReplacements = computed(() => {
   const ids = new Set()
   const out = []
-  for (const c of retiredHits.value) {
-    const rt = retirementOf(c)
+  for (const id of retiredHits.value) {
+    const rt = retirementOf(liveDoc(id))
     if (!rt || ids.has(rt.replacementDocId)) continue
     ids.add(rt.replacementDocId)
     const rep = docById.value[rt.replacementDocId]
@@ -93,7 +104,7 @@ const answerText = computed(() => {
     if (retiredCount.value) {
       return '该问题此前命中的内容已被知识退役（停止问答引用），请改看其指定的替代文档；如替代文档无访问权限，可在替代文档页申请权限。'
     }
-    return '该问题此前命中的内容来自限时授权文档，授权已撤销或到期，相关正文已同步收回。如需继续查看，请重新申请访问后再提问。'
+    return '该问题此前命中的内容已无权访问：限时授权被撤销/到期，或文档责任人变更后权限已收回，相关正文已同步收回。如需继续查看，请重新申请访问后再提问。'
   }
   return answer.value
 })
@@ -164,7 +175,7 @@ function answering() {
 
     pausedHits = hits.filter((x) => x.freshPaused && !x.retired).length
     retiredHitCount = hits.filter((x) => x.retired).length
-    retiredHits.value = hits.filter((x) => x.retired).map((x) => x.doc)
+    retiredHits.value = hits.filter((x) => x.retired).map((x) => x.doc.id)
     const citableHits = hits.filter((x) => x.citable)
 
     const top = citableHits[0]
@@ -183,12 +194,12 @@ function answering() {
     if (retiredHitCount) extraNotes.push(retiredHitCount + ' 篇相关文档已知识退役，已转由替代文档承接')
     answer.value = '基于知识库检索，我找到与「' + asked.value + '」相关的内容，引用来源如下。' + (citableHits.length > 1 ? ' 我对其归纳后优先展示最相关的 ' + Math.min(citableHits.length, 3) + ' 篇文档。' : '') + (extraNotes.length ? '（' + extraNotes.join('；') + '）' : '')
     rawCites.value = citableHits.slice(0, 3).map((h) => ({
-      ...h.doc,
+      id: h.doc.id,
       bodyText: h.bodyText,
       snippet: extractSnippet(h.doc.body, keywords),
       score: h.score
     }))
-    rawRelated.value = citableHits.slice(3, 7).map((h) => h.doc)
+    rawRelated.value = citableHits.slice(3, 7).map((h) => h.doc.id)
     thinking.value = false
     answered.value = true
   }, 600)
@@ -224,7 +235,7 @@ onMounted(() => { retirementStore.loadAll() })
         <template v-else-if="retiredCount">🗄 {{ retiredCount }} 条引用的文档已知识退役，问答引用已停止<template v-if="retiredReplacements.length">，请改看替代文档：
           <span v-for="rep in retiredReplacements" :key="rep.id" class="rep-link" @click="router.push('/docs/' + rep.id)">《{{ rep.title }}》</span>
         </template></template>
-        <template v-else>🔒 {{ revokedCount }} 条引用来自限时授权文档，授权已撤销或到期，相关正文已同步收回</template>
+        <template v-else>🔒 {{ revokedCount }} 条引用的访问权限已被收回（授权撤销/到期或责任变更），相关正文已同步消失</template>
       </div>
 
       <!-- 命中的旧文档全部已退役（未进入引用列表）：引导转看替代文档；无权限时替代文档页会引导申请权限 -->

@@ -8,6 +8,7 @@ import { GAP } from '@/utils/gap'
 import { canEditContent, GUEST_ID } from '@/utils/permission'
 import { isGrantActive, ACCESS_PERM } from '@/utils/access'
 import { isFreshReview, isFreshNoChangeReview } from '@/utils/review'
+import { notifyChange, CHANGE_SCOPE } from '@/utils/sync'
 import { useKbStore } from './kb'
 import { useGapStore } from './gap'
 import { useFreshnessStore } from './freshness'
@@ -138,6 +139,8 @@ export const useReviewStore = defineStore('review', () => {
     })
 
     await Promise.all([reload(), kb.reloadDocs()])
+    // 送审锁定正文：其他窗口的详情页需即时展示评审锁定、编辑入口关闭
+    if (result.status === 'ok') notifyChange([CHANGE_SCOPE.REVIEWS, CHANGE_SCOPE.DOCS])
     return result
   }
 
@@ -207,6 +210,7 @@ export const useReviewStore = defineStore('review', () => {
     })
 
     await Promise.all([reload(), kb.reloadDocs()])
+    if (result.status === 'ok') notifyChange([CHANGE_SCOPE.REVIEWS, CHANGE_SCOPE.DOCS])
     return result
   }
 
@@ -299,6 +303,7 @@ export const useReviewStore = defineStore('review', () => {
 
     if (result.status === 'ok' && submittedComment) kb.comments.push(submittedComment)
     await Promise.all([reload(), kb.reloadDocs(), gap.reload()])
+    if (result.status === 'ok') notifyChange([CHANGE_SCOPE.REVIEWS, CHANGE_SCOPE.DOCS, CHANGE_SCOPE.GAPS])
     return result
   }
 
@@ -500,6 +505,10 @@ export const useReviewStore = defineStore('review', () => {
     const gap = useGapStore()
     const freshness = useFreshnessStore()
     await Promise.all([reload(), kb.reloadDocs(), gap.reload(), freshness.loaded ? freshness.reload() : Promise.resolve()])
+    // 审批通过会发布正文/解除锁定、联动缺口工单与保鲜引用；驳回解除锁定：其他窗口同步
+    if (result.status === 'ok') {
+      notifyChange([CHANGE_SCOPE.REVIEWS, CHANGE_SCOPE.DOCS, CHANGE_SCOPE.GAPS, CHANGE_SCOPE.FRESHNESS])
+    }
     return result
   }
 
@@ -535,6 +544,9 @@ export const useReviewStore = defineStore('review', () => {
     const gap = useGapStore()
     const freshness = useFreshnessStore()
     await Promise.all([reload(), kb.reloadDocs(), gap.reload(), freshness.loaded ? freshness.reload() : Promise.resolve()])
+    if (result.status === 'ok') {
+      notifyChange([CHANGE_SCOPE.REVIEWS, CHANGE_SCOPE.DOCS, CHANGE_SCOPE.GAPS, CHANGE_SCOPE.FRESHNESS])
+    }
     return result
   }
 

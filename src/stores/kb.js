@@ -7,6 +7,7 @@ import { buildTimelineEntry } from '@/utils/review'
 import { GAP } from '@/utils/gap'
 import { isGrantActive, ACCESS_PERM } from '@/utils/access'
 import { canEditContent, canEditDoc, canDeleteDoc, GUEST_ID } from '@/utils/permission'
+import { notifyChange, CHANGE_SCOPE } from '@/utils/sync'
 import { useAuthStore } from './auth'
 import { useGapStore } from './gap'
 
@@ -70,6 +71,7 @@ export const useKbStore = defineStore('kb', () => {
     }
     await db.docs.add(doc)
     await reloadDocs()
+    notifyChange([CHANGE_SCOPE.DOCS])
     return doc
   }
 
@@ -168,6 +170,8 @@ export const useKbStore = defineStore('kb', () => {
       result = { status: 'saved', doc: updated, autoMerged }
     })
     await reloadDocs()
+    // 正文/标题等变化：让其他窗口已打开的详情/搜索/问答缓存即时刷新
+    if (result.status === 'saved') notifyChange([CHANGE_SCOPE.DOCS])
     return result
   }
 
@@ -220,6 +224,10 @@ export const useKbStore = defineStore('kb', () => {
     const { useFreshnessStore } = await import('./freshness')
     const freshness = useFreshnessStore()
     await Promise.all([reloadDocs(), gap.reload(), freshness.loaded ? freshness.reload() : Promise.resolve()])
+    // 文档删除：授权/链接/评审等连带失效，其他窗口的详情/搜索/问答需立即移除
+    if (result.status === 'ok') {
+      notifyChange([CHANGE_SCOPE.DOCS, CHANGE_SCOPE.ACCESS, CHANGE_SCOPE.SHARES, CHANGE_SCOPE.REVIEWS, CHANGE_SCOPE.FRESHNESS, CHANGE_SCOPE.GAPS])
+    }
     return result
   }
 

@@ -7,6 +7,7 @@ import { RETIRE, isRetirementOpen, isRetirementActive } from '@/utils/retirement
 import { GAP } from '@/utils/gap'
 import { isHandoverOpen } from '@/utils/handover'
 import { GUEST_ID, isGuestUser, ROLE } from '@/utils/permission'
+import { notifyChange, CHANGE_SCOPE } from '@/utils/sync'
 import { useKbStore } from './kb'
 
 // 知识退役替代 store：
@@ -285,6 +286,10 @@ export const useRetirementStore = defineStore('retirement', () => {
     const { useGapStore } = await import('./gap')
     const gap = useGapStore()
     await Promise.all([reload(), kb.reloadDocs(), gap.reload()])
+    // 退役生效：搜索/问答引用闸门、共享链接、答案来源均变化，通知所有窗口即时失效缓存
+    if (result.status === 'ok' && result.approved) {
+      notifyChange([CHANGE_SCOPE.RETIREMENTS, CHANGE_SCOPE.DOCS, CHANGE_SCOPE.SHARES, CHANGE_SCOPE.GAPS])
+    }
     return result
   }
 
@@ -372,6 +377,10 @@ export const useRetirementStore = defineStore('retirement', () => {
     const { useGapStore } = await import('./gap')
     const gap = useGapStore()
     await Promise.all([reload(), kb.reloadDocs(), gap.reload()])
+    // 撤销退役：搜索/问答引用恢复、共享链接恢复，通知所有窗口
+    if (result.status === 'ok') {
+      notifyChange([CHANGE_SCOPE.RETIREMENTS, CHANGE_SCOPE.DOCS, CHANGE_SCOPE.SHARES, CHANGE_SCOPE.GAPS])
+    }
     return result
   }
 

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { db } from '@/db'
 import { useKbStore } from '@/stores/kb'
@@ -12,6 +12,7 @@ import { formatFull } from '@/utils/format'
 import { shareStatus } from '@/utils/share'
 import { canEditDoc, GUEST_ID } from '@/utils/permission'
 import { docVersion } from '@/utils/version'
+import { onRemoteChange, CHANGE_SCOPE } from '@/utils/sync'
 
 const route = useRoute()
 const kb = useKbStore()
@@ -152,6 +153,18 @@ async function loadLatest() {
 
 onMounted(() => resolve(token.value))
 watch(token, () => resolve(token.value))
+
+// 跨窗口同步：链接在其他窗口被撤销（或文档随退役批量撤销链接、被删除）时，
+// 已打开的共享页立即停止展示正文；用户正在编辑且未保存时不打断，保存时 store 也会拒绝
+let offRemoteChange = null
+onMounted(() => {
+  offRemoteChange = onRemoteChange((payload) => {
+    if (!payload.scopes.some((s) => [CHANGE_SCOPE.SHARES, CHANGE_SCOPE.DOCS, CHANGE_SCOPE.RETIREMENTS, CHANGE_SCOPE.ALL].includes(s))) return
+    if (editing.value) return
+    resolve(token.value)
+  })
+})
+onBeforeUnmount(() => offRemoteChange?.())
 </script>
 
 <template>

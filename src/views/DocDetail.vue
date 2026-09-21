@@ -35,8 +35,13 @@ const freshnessStore = useFreshnessStore()
 const handoverStore = useHandoverStore()
 const retirementStore = useRetirementStore()
 
-const doc = ref(null)
-const notFound = ref(false)
+const docId = computed(() => route.params.id)
+// 文档始终取 store 中的最新引用，而不是打开时拷贝的本地快照：
+// 授权撤销 / 责任交接（ownerId、editors 变更）等事件经跨窗口同步重载 store 后，
+// 这里与 canViewDoc/canEditDoc 一起即时重算，已打开页面立即收回受限正文
+const doc = computed(() => kb.docs.find((d) => d.id === docId.value) || null)
+// 首屏数据未加载完时不误报「不存在」
+const notFound = computed(() => kb.loaded && !doc.value)
 const commentText = ref('')
 const commentMentions = ref([])
 const showVersions = ref(false)
@@ -48,7 +53,6 @@ const reviewSubmittedNotice = ref('')
 // 已提交保鲜复核的提示（由编辑器「保鲜整改」跳转携带）
 const freshSubmittedNotice = ref('')
 
-const docId = computed(() => route.params.id)
 // 兼容旧数据：早期文档可能没有 versions 字段
 const versionList = computed(() => (doc.value?.versions?.length ? doc.value.versions : []))
 
@@ -133,15 +137,13 @@ async function submitRestore() {
 
 async function refresh() {
   if (!docId.value) return
-  await Promise.all([reviewStore.loadAll(), accessStore.loadAll(), freshnessStore.loadAll(), retirementStore.loadAll()])
-  const d = await kb.getDoc(docId.value)
-  if (!d) { notFound.value = true; doc.value = null; return }
-  notFound.value = false
+  // 跨窗口同步已会在变更时重载 store；路由切到本文档时主动刷新一次拿到最新数据
+  await Promise.all([kb.loadAll(), reviewStore.loadAll(), accessStore.loadAll(), freshnessStore.loadAll(), retirementStore.loadAll()])
+  if (!doc.value) return
   // 受限文档仍保留引用：能否查看由 hasAccess 响应式判定——
-  // 授权被撤销/到期时 store 变化会即时切到「访问申请」卡片，无需刷新
-  doc.value = d
+  // 授权被撤销/到期、责任交接收回权限时 store 变化会即时切到「访问申请」卡片，无需刷新
   if (hasViewAccess.value) {
-    await engagement.recordView(auth.user?.id, d.id)
+    await engagement.recordView(auth.user?.id, doc.value.id)
     await engagement.refresh(auth.user?.id)
   }
 }
@@ -211,6 +213,10 @@ onMounted(() => {
   refresh()
 })
 watch(docId, () => { if (route.name === 'docDetail') { refresh(); showVersions.value = false } })
+// 文档在其他窗口被删除（跨窗口同步重载后）：离开已失效的详情页
+watch(notFound, (gone) => {
+  if (gone && kb.loaded && route.name === 'docDetail') router.replace('/docs')
+})
 </script>
 
 <template>

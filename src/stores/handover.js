@@ -10,6 +10,7 @@ import {
 } from '@/utils/handover'
 import { isDocRetired } from '@/utils/retirement'
 import { GUEST_ID, isGuestUser, ROLE } from '@/utils/permission'
+import { notifyChange, CHANGE_SCOPE } from '@/utils/sync'
 import { useKbStore } from './kb'
 import { useAuthStore } from './auth'
 
@@ -388,6 +389,11 @@ export const useHandoverStore = defineStore('handover', () => {
       access.loaded ? access.reload() : Promise.resolve(),
       freshness.loaded ? freshness.reload() : Promise.resolve()
     ])
+    // 批准执行会转移所有权、增删协作成员、撤销限时授权：
+    // 通知所有窗口即时重算详情/搜索/问答可见性，原负责人已打开的受限正文立即收回
+    if (result.status === 'ok' && result.approved) {
+      notifyChange([CHANGE_SCOPE.HANDOVERS, CHANGE_SCOPE.DOCS, CHANGE_SCOPE.ACCESS, CHANGE_SCOPE.REVIEWS, CHANGE_SCOPE.FRESHNESS])
+    }
     return result
   }
 

@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { db } from '@/db'
 import { uid } from '@/utils/format'
 import { ACCESS, ACCESS_PERM, isGrantActive, calcExpiresAt, buildAccessTimelineEntry } from '@/utils/access'
+import { notifyChange, CHANGE_SCOPE } from '@/utils/sync'
 
 // 文档访问申请 store：
 // 成员访问受限文档 → 提交限时阅读/协作申请（pending）→ 拥有者/管理员审批：
@@ -235,6 +236,8 @@ export const useAccessStore = defineStore('access', () => {
     })
 
     await Promise.all([reload(), kb.reloadDocs()])
+    // 授权生效/驳回：其他窗口已打开的详情/搜索/问答需按新授权重算可见性
+    if (result.status === 'ok') notifyChange([CHANGE_SCOPE.ACCESS])
     return result
   }
 
@@ -268,6 +271,8 @@ export const useAccessStore = defineStore('access', () => {
     })
 
     await Promise.all([reload(), kb.reloadDocs()])
+    // 撤销授权：通知所有窗口即时收回详情/搜索/问答中的受限正文
+    if (result.status === 'ok') notifyChange([CHANGE_SCOPE.ACCESS])
     return result
   }
 
@@ -316,6 +321,8 @@ export const useAccessStore = defineStore('access', () => {
       }
     })
     await reload()
+    // 授权到期在其他窗口到点（本窗口定时器未运行）：通知其即时收回受限内容
+    notifyChange([CHANGE_SCOPE.ACCESS])
   }
 
   // 删除文档时连带清理访问申请（拥有者删除文档，申请与授权一并失效）

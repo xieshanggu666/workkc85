@@ -12,6 +12,7 @@ import { isDocRetired } from '@/utils/retirement'
 import { GUEST_ID, isGuestUser, ROLE } from '@/utils/permission'
 import { useKbStore } from './kb'
 import { useAuthStore } from './auth'
+import { broadcast, SYNC_SCOPE } from '@/utils/sync'
 
 // 知识责任交接 store：
 // 负责人勾选名下文档批量发起交接 → 接任者确认 → 管理员批准后在同一事务内统一转移：
@@ -129,6 +130,7 @@ export const useHandoverStore = defineStore('handover', () => {
     })
 
     await reload()
+    broadcast('handover')
     return result
   }
 
@@ -155,6 +157,7 @@ export const useHandoverStore = defineStore('handover', () => {
     })
 
     await reload()
+    broadcast('handover', ['handovers'])
     return result
   }
 
@@ -181,6 +184,7 @@ export const useHandoverStore = defineStore('handover', () => {
     })
 
     await reload()
+    broadcast('handover', ['handovers'])
     return result
   }
 
@@ -207,6 +211,7 @@ export const useHandoverStore = defineStore('handover', () => {
     })
 
     await reload()
+    broadcast('handover', ['handovers'])
     return result
   }
 
@@ -388,6 +393,11 @@ export const useHandoverStore = defineStore('handover', () => {
       access.loaded ? access.reload() : Promise.resolve(),
       freshness.loaded ? freshness.reload() : Promise.resolve()
     ])
+    // 跨窗口同步：批准后所有权/协作身份/授权/评审待办/保鲜责任在其他窗口即时重算；
+    // 驳回、并发变更失败仅交接单状态变化，刷新交接列表即可
+    if (result.status === 'ok' || result.status === 'changed') {
+      broadcast('handover', result.approved ? SYNC_SCOPE.handover : ['handovers'])
+    }
     return result
   }
 

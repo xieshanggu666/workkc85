@@ -11,6 +11,7 @@ import { isFreshReview, isFreshNoChangeReview } from '@/utils/review'
 import { useKbStore } from './kb'
 import { useGapStore } from './gap'
 import { useFreshnessStore } from './freshness'
+import { broadcast } from '@/utils/sync'
 
 // 知识文档评审流程 store：
 // 发起（快照待审内容、文档置为评审中并锁定）→ 成员发表评审意见 →
@@ -138,6 +139,7 @@ export const useReviewStore = defineStore('review', () => {
     })
 
     await Promise.all([reload(), kb.reloadDocs()])
+    if (result.status === 'ok') broadcast('review')
     return result
   }
 
@@ -207,6 +209,7 @@ export const useReviewStore = defineStore('review', () => {
     })
 
     await Promise.all([reload(), kb.reloadDocs()])
+    if (result.status === 'ok') broadcast('review')
     return result
   }
 
@@ -299,6 +302,7 @@ export const useReviewStore = defineStore('review', () => {
 
     if (result.status === 'ok' && submittedComment) kb.comments.push(submittedComment)
     await Promise.all([reload(), kb.reloadDocs(), gap.reload()])
+    if (result.status === 'ok') broadcast('review')
     return result
   }
 
@@ -500,6 +504,8 @@ export const useReviewStore = defineStore('review', () => {
     const gap = useGapStore()
     const freshness = useFreshnessStore()
     await Promise.all([reload(), kb.reloadDocs(), gap.reload(), freshness.loaded ? freshness.reload() : Promise.resolve()])
+    // 跨窗口同步：审批后正文/锁定状态、缺口工单、保鲜引用资格在其他窗口即时重算
+    if (result.status === 'ok') broadcast('review', ['reviews', 'docs', 'comments', 'gapTickets', 'freshnessTickets'])
     return result
   }
 
@@ -535,6 +541,7 @@ export const useReviewStore = defineStore('review', () => {
     const gap = useGapStore()
     const freshness = useFreshnessStore()
     await Promise.all([reload(), kb.reloadDocs(), gap.reload(), freshness.loaded ? freshness.reload() : Promise.resolve()])
+    if (result.status === 'ok') broadcast('review', ['reviews', 'docs', 'gapTickets', 'freshnessTickets'])
     return result
   }
 

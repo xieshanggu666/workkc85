@@ -3,6 +3,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { db } from '@/db'
 import { uid, makeToken, formatDate, formatFull } from '@/utils/format'
 import { docUrl, shareUrl, shareStatus, shareStatusLabel } from '@/utils/share'
+import { broadcast } from '@/utils/sync'
 import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps({ open: Boolean, doc: Object })
@@ -42,6 +43,7 @@ async function create() {
   }
   await db.shares.add(s)
   shares.value.unshift(s)
+  broadcast('shares')
 }
 
 // 撤销：标记状态而非删除，链接端可明确提示「已撤销」
@@ -50,6 +52,8 @@ async function revoke(id) {
   await db.shares.update(id, { revokedAt })
   const s = shares.value.find((x) => x.id === id)
   if (s) s.revokedAt = revokedAt
+  // 跨窗口同步：持该链接的其他窗口即时失去查看/编辑资格
+  broadcast('shares')
 }
 
 function statusOf(s) {

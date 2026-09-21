@@ -67,7 +67,13 @@ function clearAll() { q.value = ''; catFilter.value = 'all'; tagFilter.value = '
 
 watch(() => route.query.q, run, { immediate: true })
 
-onMounted(() => { retirementStore.loadAll() })
+onMounted(() => {
+  // 权限闸门依赖 access/freshness/retirement：跨窗口同步只 reload 已加载的缓存，
+  // 这里显式加载，保证其他窗口撤销授权后本页结果集能随 store 实时重算
+  accessStore.loadAll()
+  freshnessStore.loadAll()
+  retirementStore.loadAll()
+})
 </script>
 
 <template>

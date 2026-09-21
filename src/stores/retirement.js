@@ -8,6 +8,7 @@ import { GAP } from '@/utils/gap'
 import { isHandoverOpen } from '@/utils/handover'
 import { GUEST_ID, isGuestUser, ROLE } from '@/utils/permission'
 import { useKbStore } from './kb'
+import { broadcast, SYNC_SCOPE } from '@/utils/sync'
 
 // 知识退役替代 store：
 // 负责人发起文档退役并指定替代文档（pending）→ 管理员批准（approved），在同一事务内：
@@ -135,6 +136,7 @@ export const useRetirementStore = defineStore('retirement', () => {
     })
 
     await reload()
+    broadcast('retirement', ['retirements'])
     return result
   }
 
@@ -161,6 +163,7 @@ export const useRetirementStore = defineStore('retirement', () => {
     })
 
     await reload()
+    broadcast('retirement', ['retirements'])
     return result
   }
 
@@ -285,6 +288,9 @@ export const useRetirementStore = defineStore('retirement', () => {
     const { useGapStore } = await import('./gap')
     const gap = useGapStore()
     await Promise.all([reload(), kb.reloadDocs(), gap.reload()])
+    // 跨窗口同步：批准后退役态、共享链接撤销、工单改挂在其他窗口即时生效
+    // （搜索/问答/详情重算）；驳回仅退役单状态变化
+    broadcast('retirement', result.approved ? SYNC_SCOPE.retirement : ['retirements'])
     return result
   }
 
@@ -372,6 +378,8 @@ export const useRetirementStore = defineStore('retirement', () => {
     const { useGapStore } = await import('./gap')
     const gap = useGapStore()
     await Promise.all([reload(), kb.reloadDocs(), gap.reload()])
+    // 跨窗口同步：退役撤销后搜索/问答引用、共享链接在其他窗口即时恢复
+    if (result.status === 'ok') broadcast('retirement', SYNC_SCOPE.retirement)
     return result
   }
 

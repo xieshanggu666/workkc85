@@ -5,6 +5,7 @@ import { uid } from '@/utils/format'
 import { REVIEW, buildTimelineEntry } from '@/utils/review'
 import { GAP, normalizeQuestion, isGroupPrimary } from '@/utils/gap'
 import { canEditContent, GUEST_ID } from '@/utils/permission'
+import { broadcast } from '@/utils/sync'
 
 // 知识缺口工单 store：
 // 成员把未解决的问答转为补写需求（open）→ 编辑者认领（claimed）→ 关联文档送审（in_review）→
@@ -95,6 +96,7 @@ export const useGapStore = defineStore('gap', () => {
     }
     await db.gapTickets.add(ticket)
     await reload()
+    broadcast('gap')
     return { status: 'ok', ticket }
   }
 
@@ -120,6 +122,7 @@ export const useGapStore = defineStore('gap', () => {
       result = { status: 'ok' }
     })
     await reload()
+    if (result.status === 'ok') broadcast('gap')
     return result
   }
 
@@ -144,6 +147,7 @@ export const useGapStore = defineStore('gap', () => {
       result = { status: 'ok' }
     })
     await reload()
+    if (result.status === 'ok') broadcast('gap')
     return result
   }
 
@@ -211,6 +215,7 @@ export const useGapStore = defineStore('gap', () => {
     })
 
     await reload()
+    if (result.status === 'ok') broadcast('gap')
     return result
   }
 
@@ -264,6 +269,7 @@ export const useGapStore = defineStore('gap', () => {
     })
 
     await reload()
+    if (result.status === 'ok') broadcast('gap')
     return result
   }
 
@@ -300,6 +306,7 @@ export const useGapStore = defineStore('gap', () => {
     })
 
     await reload()
+    if (result.status === 'ok') broadcast('gap')
     return result
   }
 
@@ -341,7 +348,10 @@ export const useGapStore = defineStore('gap', () => {
         changed = true
       }
     })
-    if (changed) await reload()
+    if (changed) {
+      await reload()
+      broadcast('gap')
+    }
   }
 
   return {

@@ -35,7 +35,6 @@ const freshnessStore = useFreshnessStore()
 const handoverStore = useHandoverStore()
 const retirementStore = useRetirementStore()
 
-const doc = ref(null)
 const notFound = ref(false)
 const commentText = ref('')
 const commentMentions = ref([])
@@ -49,6 +48,9 @@ const reviewSubmittedNotice = ref('')
 const freshSubmittedNotice = ref('')
 
 const docId = computed(() => route.params.id)
+// 文档对象始终取 kb store 中的最新记录：跨窗口授权撤销、责任交接（owner/editors 变更）触发
+// store reload 后，本页所有授权 computed 随同一引用重算，避免本地快照残留旧归属/旧正文
+const doc = computed(() => (docId.value ? kb.docs.find((d) => d.id === docId.value) || null : null))
 // 兼容旧数据：早期文档可能没有 versions 字段
 const versionList = computed(() => (doc.value?.versions?.length ? doc.value.versions : []))
 
@@ -133,15 +135,17 @@ async function submitRestore() {
 
 async function refresh() {
   if (!docId.value) return
-  await Promise.all([reviewStore.loadAll(), accessStore.loadAll(), freshnessStore.loadAll(), retirementStore.loadAll()])
-  const d = await kb.getDoc(docId.value)
-  if (!d) { notFound.value = true; doc.value = null; return }
+  await Promise.all([
+    kb.loadAll(), reviewStore.loadAll(), accessStore.loadAll(),
+    freshnessStore.loadAll(), retirementStore.loadAll(), handoverStore.loadAll()
+  ])
+  const exists = await kb.getDoc(docId.value)
+  if (!exists) { notFound.value = true; return }
   notFound.value = false
-  // 受限文档仍保留引用：能否查看由 hasAccess 响应式判定——
-  // 授权被撤销/到期时 store 变化会即时切到「访问申请」卡片，无需刷新
-  doc.value = d
+  // 受限文档仍保留引用：能否查看由 hasViewAccess 响应式判定——
+  // 授权被撤销/到期、跨窗口交接导致归属变化时 store 变化会即时切到「访问申请」卡片，无需刷新
   if (hasViewAccess.value) {
-    await engagement.recordView(auth.user?.id, d.id)
+    await engagement.recordView(auth.user?.id, exists.id)
     await engagement.refresh(auth.user?.id)
   }
 }

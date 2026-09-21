@@ -9,6 +9,7 @@ import { GUEST_ID, isGuestUser, ROLE } from '@/utils/permission'
 import { canSubmitReview } from '@/utils/review'
 import { isGrantActive, ACCESS_PERM } from '@/utils/access'
 import { useKbStore } from './kb'
+import { broadcast } from '@/utils/sync'
 
 // 知识保鲜 store：
 // 负责人（拥有者/管理员）为文档设置复核周期；到期由响应式时钟 + 调度器自动生成复核单，
@@ -214,6 +215,7 @@ export const useFreshnessStore = defineStore('freshness', () => {
     })
 
     await Promise.all([reload(), useKbStore().reloadDocs()])
+    if (result.status === 'ok') broadcast('freshness', ['freshnessTickets', 'docs'])
     return result
   }
 
@@ -251,6 +253,7 @@ export const useFreshnessStore = defineStore('freshness', () => {
     })
 
     await Promise.all([reload(), useKbStore().reloadDocs()])
+    if (result.status === 'ok') broadcast('freshness', ['freshnessTickets', 'docs'])
     return result
   }
 
@@ -328,6 +331,8 @@ export const useFreshnessStore = defineStore('freshness', () => {
 
     const { useReviewStore: useReview } = await import('./review')
     await Promise.all([reload(), kb.reloadDocs(), useReview().reload()])
+    // 跨窗口同步：送审后文档锁定、复核单状态在其他窗口即时更新（审批走 review store 广播）
+    if (result.status === 'ok') broadcast('freshness', ['freshnessTickets', 'docs', 'reviews', 'comments'])
     return result
   }
 

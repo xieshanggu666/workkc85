@@ -13,7 +13,8 @@
     "test:access": "mkdir -p node_modules/.cache && esbuild scripts/run-access-expiry-test.mjs --bundle --platform=node --format=esm --outfile=node_modules/.cache/access-expiry-test.mjs --alias:@=./src && node node_modules/.cache/access-expiry-test.mjs",
     "test:freshness": "mkdir -p node_modules/.cache && esbuild scripts/run-freshness-test.mjs --bundle --platform=node --format=esm --outfile=node_modules/.cache/freshness-test.mjs --alias:@=./src && node node_modules/.cache/freshness-test.mjs",
     "test:handover": "mkdir -p node_modules/.cache && esbuild scripts/run-handover-test.mjs --bundle --platform=node --format=esm --outfile=node_modules/.cache/handover-test.mjs --alias:@=./src && node node_modules/.cache/handover-test.mjs",
-    "test:retirement": "mkdir -p node_modules/.cache && esbuild scripts/run-retirement-test.mjs --bundle --platform=node --format=esm --outfile=node_modules/.cache/retirement-test.mjs --alias:@=./src && node node_modules/.cache/retirement-test.mjs"
+    "test:retirement": "mkdir -p node_modules/.cache && esbuild scripts/run-retirement-test.mjs --bundle --platform=node --format=esm --outfile=node_modules/.cache/retirement-test.mjs --alias:@=./src && node node_modules/.cache/retirement-test.mjs",
+    "test:sync": "mkdir -p node_modules/.cache && esbuild scripts/run-sync-test.mjs --bundle --platform=node --format=esm --outfile=node_modules/.cache/sync-test.mjs --alias:@=./src && node node_modules/.cache/sync-test.mjs"
   },
   "dependencies": {
     "dexie": "^4.0.8",

@@ -39,24 +39,34 @@ const rawRelated = ref([])
 const retiredHits = ref([])
 const suggestions = ['Vue 如何初始化项目?', 'Dexie 怎么进行查询?', '权限模型里有哪些角色?', '新成员入职流程是什么?']
 
-// 展示用引用/相关条目：随授权记录、到期时钟、退役状态响应式重算，被收回/退役的内容即时消失
-function grantOf(d) { return accessStore.grantOf(d.id, auth.user?.id) }
-function freshTicketOf(d) { return freshnessStore.activeTicketOf(d.id) }
-function retirementOf(d) { return retirementStore.activeRetirementOfDoc(d.id) }
-const citableNow = (d) =>
-  isDocCitable(d, freshTicketOf(d), freshnessStore.now) &&
-  isDocRetireCitable(d, retirementOf(d))
-const cites = computed(() => rawCites.value.filter((c) => canViewDoc(c, auth.user?.id, null, grantOf(c)) && citableNow(c)))
-const related = computed(() => rawRelated.value.filter((d) => canViewDoc(d, auth.user?.id, null, grantOf(d)) && citableNow(d)))
+// 展示用引用/相关条目：随授权记录、到期时钟、退役状态响应式重算，被收回/退役的内容即时消失。
+// 可见性/引用资格一律以 kb store 中该 id 的最新文档判定，避免提问时刻快照在跨窗口
+// 撤销授权、责任交接（owner/editors 变化）后残留旧权限
+function liveDoc(d) { return docById.value[d.id] || null }
+function grantOf(d) { const cur = liveDoc(d); return cur ? accessStore.grantOf(cur.id, auth.user?.id) : null }
+function freshTicketOf(d) { const cur = liveDoc(d); return cur ? freshnessStore.activeTicketOf(cur.id) : null }
+function retirementOf(d) { const cur = liveDoc(d); return cur ? retirementStore.activeRetirementOfDoc(cur.id) : null }
+const citableNow = (d) => {
+  const cur = liveDoc(d)
+  return cur &&
+    isDocCitable(cur, freshTicketOf(d), freshnessStore.now) &&
+    isDocRetireCitable(cur, retirementOf(d))
+}
+const viewableNow = (d) => {
+  const cur = liveDoc(d)
+  return !!cur && canViewDoc(cur, auth.user?.id, null, grantOf(d))
+}
+const cites = computed(() => rawCites.value.filter((c) => viewableNow(c) && citableNow(c)))
+const related = computed(() => rawRelated.value.filter((d) => viewableNow(d) && citableNow(d)))
 // 已渲染答案中被收回的引用数（限时授权撤销/到期、知识保鲜暂停、知识退役导致）
 const revokedCount = computed(() => rawCites.value.length - cites.value.length)
 // 其中因知识保鲜到期暂停引用的篇数（用于给出针对性提示）
-const freshnessPausedCount = computed(() => rawCites.value.filter((c) => canViewDoc(c, auth.user?.id, null, grantOf(c)) && !isDocCitable(c, freshTicketOf(c), freshnessStore.now)).length)
+const freshnessPausedCount = computed(() => rawCites.value.filter((c) => viewableNow(c) && !isDocCitable(liveDoc(c), freshTicketOf(c), freshnessStore.now)).length)
 // 其中因知识退役停止引用的篇数
 const retiredCount = computed(() => rawCites.value.filter((c) =>
-  canViewDoc(c, auth.user?.id, null, grantOf(c)) &&
-  isDocCitable(c, freshTicketOf(c), freshnessStore.now) &&
-  !isDocRetireCitable(c, retirementOf(c))
+  viewableNow(c) &&
+  isDocCitable(liveDoc(c), freshTicketOf(c), freshnessStore.now) &&
+  !isDocRetireCitable(liveDoc(c), retirementOf(c))
 ).length)
 // 被退役引用所指向的替代文档（提示用户转看新文档）
 const retiredReplacements = computed(() => {
@@ -143,9 +153,10 @@ function answering() {
     let pausedHits = 0
     // 可见但已知识退役的命中：不作为引用来源，单独统计并引导转看替代文档
     let retiredHitCount = 0
-    // 权限：撤销/到期的授权文档不再作为问答引用来源；知识保鲜到期/复核中、知识退役的文档均不参与问答引用
+    // 权限：撤销/到期的授权文档不再作为问答引用来源；知识保鲜到期/复核中、知识退役的文档均不参与问答引用。
+    // 以 kb store 最新记录判定（跨窗口变更已通过广播 reload），不用任何缓存快照
     const hits = kb.docs
-      .filter((d) => canViewDoc(d, auth.user?.id, null, grantOf(d)))
+      .filter((d) => canViewDoc(d, auth.user?.id, null, accessStore.grantOf(d.id, auth.user?.id)))
       .map((d) => {
         const bodyText = stripHtml(d.body)
         const freshOk = isDocCitable(d, freshTicketOf(d), freshnessStore.now)
@@ -197,7 +208,14 @@ function answering() {
 function useSuggestion(s) { question.value = s; ask(s) }
 
 watch(() => route.query.q, (v) => { if (v) { question.value = v; ask(v) } }, { immediate: true })
-onMounted(() => { retirementStore.loadAll() })
+onMounted(() => {
+  // 显式加载权限相关缓存：跨窗口撤销/交接后 onSync 才会刷新本页依赖的 grant/退役/保鲜状态，
+  // 已渲染答案中的受限引用与正文片段由 cites/related computed 即时收回
+  accessStore.loadAll()
+  freshnessStore.loadAll()
+  gapStore.loadAll()
+  retirementStore.loadAll()
+})
 </script>
 
 <template>

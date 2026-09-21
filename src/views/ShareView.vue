@@ -1,11 +1,12 @@
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { db } from '@/db'
 import { useKbStore } from '@/stores/kb'
 import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
 import { useRetirementStore } from '@/stores/retirement'
+import { onSync } from '@/utils/sync'
 import DocPill from '@/components/common/DocPill.vue'
 import RichEditor from '@/components/doc/RichEditor.vue'
 import { formatFull } from '@/utils/format'
@@ -152,6 +153,28 @@ async function loadLatest() {
 
 onMounted(() => resolve(token.value))
 watch(token, () => resolve(token.value))
+
+// 跨窗口同步：其他窗口撤销共享链接、退役或改动本文档时，已打开的共享页立即重新解析，
+// 受限正文/编辑入口即时收回（正在编辑冲突处理时不打断，由保存时的事务校验兜底）
+let offSync = null
+onMounted(() => {
+  offSync = onSync(async (payload) => {
+    if (status.value === 'loading') return
+    const tables = payload.tables || []
+    if (!tables.includes('shares') && !tables.includes('docs') && !tables.includes('retirements')) return
+    // 只响应与当前链接/文档相关的变更，避免无关文档广播打断本页
+    if (tables.includes('shares') && share.value) {
+      const freshShare = await db.shares.get(share.value.id)
+      if (freshShare && !freshShare.revokedAt && shareStatus(freshShare) !== 'expired') return
+    }
+    if (share.value && !tables.includes('shares')) {
+      const freshDoc = await db.docs.get(share.value.docId)
+      if (freshDoc && freshDoc.updatedAt === doc.value?.updatedAt) return
+    }
+    resolve(token.value)
+  })
+})
+onBeforeUnmount(() => { offSync && offSync() })
 </script>
 
 <template>

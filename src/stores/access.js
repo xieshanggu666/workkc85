@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { db } from '@/db'
 import { uid } from '@/utils/format'
 import { ACCESS, ACCESS_PERM, isGrantActive, calcExpiresAt, buildAccessTimelineEntry } from '@/utils/access'
+import { broadcast } from '@/utils/sync'
 
 // 文档访问申请 store：
 // 成员访问受限文档 → 提交限时阅读/协作申请（pending）→ 拥有者/管理员审批：
@@ -164,6 +165,8 @@ export const useAccessStore = defineStore('access', () => {
     })
 
     await reload()
+    // 跨窗口同步：申请提交后拥有者窗口的待办列表、申请人窗口的状态即时更新
+    broadcast('access')
     return result
   }
 
@@ -235,6 +238,8 @@ export const useAccessStore = defineStore('access', () => {
     })
 
     await Promise.all([reload(), kb.reloadDocs()])
+    // 跨窗口同步：其他窗口（尤其申请人）已打开的详情/搜索/问答缓存即时失效
+    broadcast('access')
     return result
   }
 
@@ -268,6 +273,8 @@ export const useAccessStore = defineStore('access', () => {
     })
 
     await Promise.all([reload(), kb.reloadDocs()])
+    // 跨窗口同步：被授权人窗口无需刷新，详情正文、搜索命中、问答引用立即收回
+    broadcast('access')
     return result
   }
 
@@ -292,6 +299,7 @@ export const useAccessStore = defineStore('access', () => {
     })
 
     await reload()
+    broadcast('access')
     return result
   }
 

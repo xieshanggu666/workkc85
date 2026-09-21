@@ -9,6 +9,7 @@ import { isGrantActive, ACCESS_PERM } from '@/utils/access'
 import { canEditContent, canEditDoc, canDeleteDoc, GUEST_ID } from '@/utils/permission'
 import { useAuthStore } from './auth'
 import { useGapStore } from './gap'
+import { broadcast } from '@/utils/sync'
 
 export const useKbStore = defineStore('kb', () => {
   const docs = ref([])
@@ -31,6 +32,18 @@ export const useKbStore = defineStore('kb', () => {
 
   async function reloadDocs() {
     docs.value = await db.docs.toArray()
+  }
+
+  // 跨窗口同步统一入口：文档表收到其他窗口的变更广播后整体刷新
+  // （分类/标签/评论为低频管理数据，当前页面的写操作已本地更新，此处以文档为主）
+  async function reload() {
+    const [docRows, catRows, tagRows, cmtRows] = await Promise.all([
+      db.docs.toArray(), db.categories.toArray(), db.tags.toArray(), db.comments.toArray()
+    ])
+    docs.value = docRows
+    categories.value = catRows
+    tags.value = tagRows
+    comments.value = cmtRows
   }
 
   async function getDoc(id) {
@@ -70,6 +83,8 @@ export const useKbStore = defineStore('kb', () => {
     }
     await db.docs.add(doc)
     await reloadDocs()
+    // 跨窗口同步：新文档在其他窗口的列表/搜索/问答候选中即时出现
+    broadcast('docs')
     return doc
   }
 
@@ -168,6 +183,8 @@ export const useKbStore = defineStore('kb', () => {
       result = { status: 'saved', doc: updated, autoMerged }
     })
     await reloadDocs()
+    // 跨窗口同步：保存成功（可见性/正文等）即时反映到其他窗口的详情/搜索/问答
+    if (result?.status === 'saved') broadcast('docs')
     return result
   }
 
@@ -220,6 +237,10 @@ export const useKbStore = defineStore('kb', () => {
     const { useFreshnessStore } = await import('./freshness')
     const freshness = useFreshnessStore()
     await Promise.all([reloadDocs(), gap.reload(), freshness.loaded ? freshness.reload() : Promise.resolve()])
+    // 跨窗口同步：文档及其授权/申请/评审等已连带清理，其他窗口缓存全部按实际写表刷新
+    if (result.status === 'ok') {
+      broadcast('docs', ['docs', 'comments', 'shares', 'reviews', 'accessRequests', 'gapTickets', 'freshnessTickets'])
+    }
     return result
   }
 
@@ -254,7 +275,7 @@ export const useKbStore = defineStore('kb', () => {
 
   return {
     docs, categories, tags, comments, loaded,
-    catMap, tagMap, loadAll, reloadDocs, getDoc, getDocFresh, createDoc, updateDoc, deleteDoc,
+    catMap, tagMap, loadAll, reload, reloadDocs, getDoc, getDocFresh, createDoc, updateDoc, deleteDoc,
     addCategory, addTag, addComment, commentsOf
   }
 })

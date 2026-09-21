@@ -21,7 +21,10 @@ const freshnessStore = useFreshnessStore()
 const retirementStore = useRetirementStore()
 
 const isEdit = computed(() => route.params.id && route.params.id !== 'new')
-const editingDoc = ref(null)
+// 打开的文档 id：正文编辑内容仍由本地字段承载，但权限判定始终读 kb store 最新记录，
+// 跨窗口撤销授权 / 责任交接导致归属变化后编辑器即时锁定，不依赖打开时的快照
+const editingDocId = ref(null)
+const editingDoc = computed(() => (editingDocId.value ? kb.docs.find((d) => d.id === editingDocId.value) || null : null))
 
 const title = ref('')
 const categoryId = ref('')
@@ -37,15 +40,24 @@ const saving = ref(false)
 // fresh 知识保鲜整改：修订后送当轮复核，管理员复核通过恢复引用并重算周期
 const submitMode = ref(route.query.freshReview ? 'fresh' : route.query.submitReview ? 'review' : 'save')
 const reviewNote = ref('')
-// 知识保鲜当前流转复核单（fresh 模式下送审目标）
-const freshTicket = ref(null)
-// 文档当前是否处于评审中（非管理员进入时只读锁定）
-const lockedByReview = ref(false)
-const activeReview = ref(null)
-// 无编辑权限（非拥有者/协作成员，且无有效限时协作授权，或授权已撤销/到期）
-const accessDenied = ref(false)
-// 当前用户的有效限时授权（限时协作成员可编辑，但不能发起评审）
-const activeGrant = ref(null)
+// 知识保鲜当前流转复核单（fresh 模式下送审目标）——响应式跟随 store
+const freshTicket = computed(() => (editingDoc.value ? freshnessStore.activeTicketOf(editingDoc.value.id) : null))
+// 文档当前是否处于评审中（非管理员进入时只读锁定）——评审状态跨窗口变化即时锁定
+const activeReview = computed(() => (editingDoc.value ? reviewStore.pendingReviewOf(editingDoc.value.id) : null))
+const lockedByReview = computed(() => !!activeReview.value && auth.user?.role !== ROLE.ADMIN)
+// 当前用户的有效限时授权（限时协作成员可编辑，但不能发起评审）——授权撤销/到期跨窗口即时失效
+const activeGrant = computed(() => (editingDoc.value ? accessStore.grantOf(editingDoc.value.id, auth.user?.id) : null))
+// 无编辑权限（非拥有者/协作成员，且无有效限时协作授权，或授权已撤销/到期/文档已退役）。
+// 全部依赖 store 实时状态：其他窗口撤销授权或责任交接后，编辑器无需刷新即锁定
+const accessDenied = computed(() => editingDoc.value
+  ? !canEditDoc(editingDoc.value, {
+      userId: auth.user?.id || GUEST_ID,
+      role: auth.user?.role,
+      grant: activeGrant.value,
+      pendingReview: activeReview.value,
+      activeRetirement: retirementStore.activeRetirementOfDoc(editingDoc.value.id)
+    })
+  : false)
 // 乐观锁基线：打开编辑器时的版本号与字段快照，保存时据此检测并合并并发修改
 const baseVersion = ref(null)
 const baseDoc = ref(null)
@@ -82,7 +94,7 @@ function snapshotBase(d) {
 }
 
 function applyDoc(d) {
-  editingDoc.value = d
+  editingDocId.value = d.id
   title.value = d.title; categoryId.value = d.categoryId; tagIds.value = [...(d.tagIds || [])]
   visibility.value = d.visibility; body.value = d.body
   snapshotBase(d)
@@ -211,25 +223,13 @@ async function load() {
     // 直接读库取最新文档作为编辑基线，避免基于内存缓存的旧快照保存
     const d = await kb.getDocFresh(route.params.id)
     if (d) applyDoc(d)
-    // 评审中：非管理员进入编辑器只读锁定，引导前往详情查看评审
-    await reviewStore.loadAll()
-    const active = reviewStore.pendingReviewOf(route.params.id)
-    activeReview.value = active
-    lockedByReview.value = !!active && auth.user?.role !== ROLE.ADMIN
-    // 知识保鲜：取当前流转复核单，fresh 模式失效（已送审/无单）时回退直接保存模式
-    await freshnessStore.loadAll()
-    freshTicket.value = d ? freshnessStore.activeTicketOf(d.id) : null
-    if (route.query.freshReview && (!freshTicket.value || freshTicket.value.status === 'submitted')) {
+    // 权限相关 store 显式加载：跨窗口同步只 reload 已加载缓存，
+    // 授权撤销/交接/评审/退役变化后上面的 computed 即时锁定编辑器
+    await Promise.all([reviewStore.loadAll(), freshnessStore.loadAll(), retirementStore.loadAll(), accessStore.loadAll()])
+    // 知识保鲜：fresh 模式失效（已送审/无单）时回退直接保存模式
+    if (d && route.query.freshReview && (!freshTicket.value || freshTicket.value.status === 'submitted')) {
       submitMode.value = 'save'
     }
-    // 编辑权限：拥有者/固定协作成员/持有效限时协作授权；授权撤销或到期后进入即被收回；
-    // 已退役文档为只读归档，任何身份都不可再编辑（需先撤销退役）
-    await retirementStore.loadAll()
-    const activeRetirement = d ? retirementStore.activeRetirementOfDoc(d.id) : null
-    activeGrant.value = d ? accessStore.grantOf(d.id, auth.user?.id) : null
-    accessDenied.value = d
-      ? !canEditDoc(d, { userId: auth.user?.id || GUEST_ID, role: auth.user?.role, grant: activeGrant.value, pendingReview: active, activeRetirement })
-      : false
     // 限时协作授权的只读成员没有「发起评审」通道，强制直接保存模式
     if (activeGrant.value && auth.user?.role !== ROLE.ADMIN && auth.user?.role !== ROLE.EDITOR) {
       submitMode.value = 'save'
